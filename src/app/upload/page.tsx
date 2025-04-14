@@ -5,39 +5,25 @@ import { Upload, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useRouter } from "next/navigation";
-import { useCompletion } from "@ai-sdk/react";
+import { useChat } from "@ai-sdk/react";
 import { Markdown } from "@/components/markdown";
 import { Card, CardContent } from "@/components/ui/card";
+import Image from "next/image";
 
 export default function UploadPage() {
   const router = useRouter();
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<string>("");
 
-  const {
-    complete,
-    completion,
-    isLoading: isAnalyzing,
-  } = useCompletion({
-    api: "/api/analyze",
-    onFinish: (result) => {
-      setAnalyzing(false);
-      setAnalysis(result);
-    },
-    onError: (error) => {
-      setAnalyzing(false);
-      console.error("Error analyzing image:", error);
-    },
+  const { messages, append, isLoading } = useChat({
+    api: "/api/chat/",
+    initialMessages: [],
   });
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(acceptedFiles);
     const newPreviews = acceptedFiles.map((file) => URL.createObjectURL(file));
     setPreviews(newPreviews);
-    // Reset analysis when new file is uploaded
-    setAnalysis("");
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -49,33 +35,27 @@ export default function UploadPage() {
   });
 
   const handleAnalyze = async () => {
-    if (files.length === 0) return;
+    if (!files.length) return;
 
-    setAnalyzing(true);
     const file = files[0];
+    const base64Image = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result);
+      reader.readAsDataURL(file);
+    });
 
-    try {
-      // First, upload the image to get a URL
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload image");
-      }
-
-      const { imageUrl } = await uploadResponse.json();
-
-      // Now analyze the image
-      await complete(`image=${encodeURIComponent(imageUrl)}`);
-    } catch (error) {
-      console.error("Error processing image:", error);
-      setAnalyzing(false);
-    }
+    await append({
+      role: "user",
+      content:
+        "Analyze this image and describe the style, colors, and fashion elements in detail.",
+      experimental_attachments: [
+        {
+          url: base64Image as string,
+          name: file.name,
+          contentType: file.type,
+        },
+      ],
+    });
   };
 
   return (
@@ -133,11 +113,12 @@ export default function UploadPage() {
             </div>
             <div className="flex justify-end">
               <Button
+                type="button"
                 size="lg"
-                onClick={handleAnalyze}
-                disabled={analyzing || isAnalyzing}
+                onClick={() => handleAnalyze()}
+                disabled={!files.length || isLoading}
               >
-                {analyzing || isAnalyzing ? (
+                {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Analyzing...
@@ -150,17 +131,38 @@ export default function UploadPage() {
           </div>
         )}
 
-        {analysis && (
+        {messages.length > 0 && (
           <Card className="mt-8">
             <CardContent className="pt-6">
-              <div className="prose max-w-none dark:prose-invert">
-                <Markdown content={analysis} />
+              <div className="prose max-w-none dark:prose-invert space-y-4">
+                {messages.map((m) => (
+                  <div key={m.id} className="space-y-4">
+                    {m.role === "assistant" && m.content && (
+                      <Markdown content={m.content} />
+                    )}
+                    {m.experimental_attachments?.map(
+                      (attachment, index) =>
+                        attachment.contentType?.startsWith("image/") && (
+                          <Image
+                            key={`${m.id}-${index}`}
+                            src={attachment.url}
+                            width={500}
+                            height={500}
+                            alt={attachment.name ?? `attachment-${index}`}
+                            className="rounded-lg"
+                          />
+                        )
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="mt-6 flex justify-end">
-                <Button onClick={() => router.push("/generate")} size="lg">
-                  Generate Similar Style
-                </Button>
-              </div>
+              {messages.some((m) => m.role === "assistant" && m.content) && (
+                <div className="mt-6 flex justify-end">
+                  <Button onClick={() => router.push("/generate")} size="lg">
+                    Generate Similar Style
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

@@ -1,5 +1,5 @@
 import { openai } from "@/lib/openai";
-import { streamText, Message } from "ai";
+import { streamText, type Message } from "ai";
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30;
@@ -8,7 +8,6 @@ export async function POST(req: Request) {
   try {
     const { messages }: { messages: Message[] } = await req.json();
 
-    // Use GPT-4o model which has vision capabilities
     const result = streamText({
       model: openai("gpt-4o-mini"),
       messages,
@@ -18,10 +17,13 @@ export async function POST(req: Request) {
 
     return result.toDataStreamResponse();
   } catch (error) {
-    console.error("Error in analyze route:", error);
-    return new Response(JSON.stringify({ error: "Failed to analyze image" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    console.error("Error in chat route:", error);
+    return new Response(
+      JSON.stringify({ error: "Failed to process request" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 }
